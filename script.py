@@ -41,12 +41,20 @@ def parse_block_type(block, numbered_list_index, depth):
         return "---"
     if block["type"] == "image":
         return get_image(block)
+    
     result = ""
-    for rich_text in block["content"]["rich_text"]:
-        text = parse_annotations(rich_text["annotations"], rich_text["plain_text"])
-        if rich_text["href"]:
-            text = f"[{text}]({rich_text['href']})"
-        result += text
+    content = block.get("content", {})
+    # Only iterate if 'rich_text' is present
+    if "rich_text" in content:
+        for rich_text in content["rich_text"]:
+            text = parse_annotations(rich_text["annotations"], rich_text["plain_text"])
+            if rich_text.get("href"):
+                text = f"[{text}]({rich_text['href']})"
+            result += text
+    else:
+        # If 'rich_text' is missing, return an empty string or handle it as needed.
+        result = ""
+    
     if result:
         if block["type"] == "heading_1":
             result = f"# {result}"
@@ -55,13 +63,13 @@ def parse_block_type(block, numbered_list_index, depth):
         elif block["type"] == "heading_3":
             result = f"### {result}"
         elif block["type"] == "code":
-            result = f"```{block['content']['language']}\n{result}\n```"
+            result = f"```{block['content'].get('language', '')}\n{result}\n```"
         elif block["type"] == "bulleted_list_item":
             result = f"- {result}"
         elif block["type"] == "numbered_list_item":
             result = f"{numbered_list_index}. {result}"
         elif block["type"] == "to_do":
-            if block["content"]["checked"]:
+            if block["content"].get("checked"):
                 result = f"- [x] {result}"
             else:
                 result = f"- [ ] {result}"
@@ -69,6 +77,7 @@ def parse_block_type(block, numbered_list_index, depth):
             result = f"> {result}"
         result = "\t" * depth + result
     return result
+
 
 
 def render_page(blocks, depth):
