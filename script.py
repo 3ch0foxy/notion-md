@@ -111,14 +111,21 @@ def query_blocks(page_id, start_cursor=None, blocks=None):
 
 
 def parse_frontmatter(properties):
-    return json.dumps({
-        "categories": [item["name"] for item in properties["Categories"]["multi_select"]],
-        "date": properties["Date"]["date"]["start"],
-        "tags": [item["name"] for item in properties["Tags"]["multi_select"]],
-        "title": properties["Title"]["title"][0]["plain_text"],
-        "url": properties["URL"]["url"],
-        "summary": properties["Summary"]["rich_text"][0]["plain_text"] if properties["Summary"]["rich_text"] else ""
-    })
+    # Optional: If you don't use Categories, this will default to an empty list.
+    categories = []
+    if "Categories" in properties:
+        categories = [item["name"] for item in properties["Categories"].get("multi_select", [])]
+    
+    # Build the frontmatter using only the fields you have.
+    frontmatter = {
+        "categories": categories,  # Will be an empty list if there's no Categories property.
+        "date": properties["Date"]["date"]["start"] if "Date" in properties else "",
+        "tags": [item["name"] for item in properties["Tags"].get("multi_select", [])] if "Tags" in properties else [],
+        "title": properties["Title"]["title"][0]["plain_text"] if "Title" in properties and properties["Title"]["title"] else "Untitled",
+        "url": properties["URL"]["url"] if "URL" in properties else ""
+    }
+    return json.dumps(frontmatter)
+
 
 
 def query_db(db_id):
