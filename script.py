@@ -9,13 +9,15 @@ from multiprocessing import Pool
 
 # PaperMod don't show image's caption
 def get_image(block):
-    url = block["content"]["file"]["url"]
-    filename = f"{block['id']}.{url.split('/')[-1].split('?')[0].split('.')[-1]}"
-    image_data = requests.get(url).content
-    with open(f"{args.static}/{filename}", "wb") as file:
-        file.write(image_data)
-    image_path = os.path.join(args.url, filename)
-    return f"![]({image_path}#center)"
+    content = block.get("content", {})
+    # If the block has a 'file' key and it contains a URL, use that.
+    if "file" in content and content["file"].get("url"):
+        return content["file"]["url"]
+    # Alternatively, check for an 'external' key (for externally hosted images)
+    elif "external" in content and content["external"].get("url"):
+        return content["external"]["url"]
+    # Otherwise, return an empty string (or handle it as needed)
+    return ""
 
 
 def parse_annotations(annotations, text):
