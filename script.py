@@ -78,7 +78,7 @@ def query_blocks(page_id, start_cursor=None, blocks=None):
     
     return query_blocks(page_id, response.get("next_cursor"), result) if response.get("has_more") else result
 
-# Parses frontmatter data safely (🚀 No more "Summary"!)
+# Parses frontmatter data safely
 def parse_frontmatter(properties):
     return json.dumps({
         "categories": [item["name"] for item in properties.get("Categories", {}).get("multi_select", [])],
