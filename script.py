@@ -5,31 +5,35 @@ import argparse
 import os
 from multiprocessing import Pool
 
-# Function to safely extract image URLs
+# Function to safely extract image URLs and save the image locally
 def get_image(block):
     url = block.get("content", {}).get("file", {}).get("url", "")
     if not url:
         return ""
-    
     filename = f"{block['id']}.{url.split('/')[-1].split('?')[0].split('.')[-1]}"
     image_data = requests.get(url).content
     with open(f"{args.static}/{filename}", "wb") as file:
         file.write(image_data)
-
     image_path = os.path.join(args.url, filename)
     return f"![]({image_path}#center)"
 
 # Function to handle rich text annotations in Notion
 def parse_annotations(annotations, text):
-    if annotations.get("code"): text = f"`{text}`"
-    if annotations.get("bold"): text = f"**{text}**"
-    if annotations.get("italic"): text = f"*{text}*"
-    if annotations.get("strikethrough"): text = f"~~{text}~~"
-    if annotations.get("underline"): text = f"<u>{text}</u>"
-    if "background" in annotations.get("color", ""): text = f"<mark>{text}</mark>"
+    if annotations.get("code"):
+        text = f"`{text}`"
+    if annotations.get("bold"):
+        text = f"**{text}**"
+    if annotations.get("italic"):
+        text = f"*{text}*"
+    if annotations.get("strikethrough"):
+        text = f"~~{text}~~"
+    if annotations.get("underline"):
+        text = f"<u>{text}</u>"
+    if "background" in annotations.get("color", ""):
+        text = f"<mark>{text}</mark>"
     return text
 
-# Function to parse Notion block types into Markdown
+# Function to parse a Notion block into Markdown format
 def parse_block_type(block, numbered_list_index, depth):
     block_type = block.get("type", "")
     result = ""
@@ -39,32 +43,45 @@ def parse_block_type(block, numbered_list_index, depth):
     if block_type == "image":
         return get_image(block)
     
-    rich_text = block.get("content", {}).get("rich_text", [])
-    for text_data in rich_text:
+    rich_texts = block.get("content", {}).get("rich_text", [])
+    for text_data in rich_texts:
         text = parse_annotations(text_data.get("annotations", {}), text_data.get("plain_text", ""))
         if text_data.get("href"):
             text = f"[{text}]({text_data['href']})"
         result += text
 
-    # Formatting based on block type
-    format_map = {
-        "heading_1": f"# {result}",
-        "heading_2": f"## {result}",
-        "heading_3": f"### {result}",
-        "code": f"```{block.get('content', {}).get('language', '')}\n{result}\n```",
-        "bulleted_list_item": f"- {result}",
-        "numbered_list_item": f"{numbered_list_index}. {result}",
-        "to_do": f"- {'[x]' if block.get('content', {}).get('checked') else '[ ]'} {result}",
-        "quote": f"> {result}",
-    }
-    return "\t" * depth + format_map.get(block_type, result)
+    if result:
+        if block_type == "heading_1":
+            result = f"# {result}"
+        elif block_type == "heading_2":
+            result = f"## {result}"
+        elif block_type == "heading_3":
+            result = f"### {result}"
+        elif block_type == "code":
+            result = f"```{block.get('content', {}).get('language', '')}\n{result}\n```"
+        elif block_type == "bulleted_list_item":
+            result = f"- {result}"
+        elif block_type == "numbered_list_item":
+            result = f"{numbered_list_index}. {result}"
+        elif block_type == "to_do":
+            if block.get("content", {}).get("checked"):
+                result = f"- [x] {result}"
+            else:
+                result = f"- [ ] {result}"
+        elif block_type == "quote":
+            result = f"> {result}"
+        result = "\t" * depth + result
+    return result
 
-# Recursively renders Notion page content
+# Recursively renders Notion page content into Markdown
 def render_page(blocks, depth=0):
     page = ""
     numbered_list_index = 0
     for block in blocks:
-        numbered_list_index = numbered_list_index + 1 if block.get("type") == "numbered_list_item" else 0
+        if block.get("type") == "numbered_list_item":
+            numbered_list_index += 1
+        else:
+            numbered_list_index = 0
         text = parse_block_type(block, numbered_list_index, depth)
         if text:
             page += f"\n\n{text}"
@@ -72,22 +89,27 @@ def render_page(blocks, depth=0):
             page += render_page(block["children"], depth + 1)
     return page
 
-# Fetches child blocks recursively
+# Fetches the child blocks from a Notion page recursively
 def query_blocks(page_id, start_cursor=None, blocks=None):
     result = blocks if blocks else []
     url = f"https://api.notion.com/v1/blocks/{page_id}/children"
     if start_cursor:
         url += f"?start_cursor={start_cursor}"
-    
     response = requests.get(url, headers=headers).json()
-    
     for item in response.get("results", []):
         children = query_blocks(item["id"]) if item.get("has_children") else []
-        result.append({"id": item["id"], "type": item["type"], "content": item.get(item["type"], {}), "children": children})
-    
-    return query_blocks(page_id, response.get("next_cursor"), result) if response.get("has_more") else result
+        result.append({
+            "id": item["id"],
+            "type": item["type"],
+            "content": item.get(item["type"], {}),
+            "children": children
+        })
+    if response.get("has_more"):
+        result = query_blocks(page_id, response.get("next_cursor"), result)
+    return result
 
-# Parses frontmatter data safely for your Notion database structure
+# Parses the frontmatter data from a Notion page using your database attributes.
+# Notice: The "Summary" attribute has been completely removed.
 def parse_frontmatter(properties):
     return json.dumps({
         "title": properties.get("Title", {}).get("title", [{}])[0].get("plain_text", "Untitled"),
@@ -95,24 +117,30 @@ def parse_frontmatter(properties):
         "tags": [item["name"] for item in properties.get("Tags", {}).get("multi_select", [])],
         "categories": [item["name"] for item in properties.get("Categories", {}).get("multi_select", [])],
         "url": properties.get("URL", {}).get("url", ""),
-        "published": properties.get("Published", {}).get("checkbox", False)  # Ensuring it defaults to False if missing
+        "published": properties.get("Published", {}).get("checkbox", False)
     })
 
-# Fetches pages from your Notion database
+# Queries your Notion database and creates a mapping for page IDs to frontmatter.
 def query_db(db_id):
     result = {}
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
     response = requests.post(url, headers=headers).json()
-
     for item in response.get("results", []):
         if args.hugo and item.get("properties", {}).get("Published", {}).get("checkbox"):
-            result[item["id"]] = parse_frontmatter(item["properties"])
+            result[item["id"]] = parse_frontmatter(item.get("properties", {}))
         else:
             result[item["id"]] = ""
+    while response.get("has_more"):
+        data = {"start_cursor": response.get("next_cursor")}
+        response = requests.post(url, headers=headers, data=json.dumps(data)).json()
+        for item in response.get("results", []):
+            if args.hugo and item.get("properties", {}).get("Published", {}).get("checkbox"):
+                result[item["id"]] = parse_frontmatter(item.get("properties", {}))
+            else:
+                result[item["id"]] = ""
+    return result
 
-    return query_db(db_id, response.get("next_cursor"), result) if response.get("has_more") else result
-
-# Multithreading for page rendering
+# Renders a page concurrently using multiprocessing
 def multi_thread(page_items):
     page_id, frontmatter = page_items
     blocks = query_blocks(page_id)
@@ -121,13 +149,13 @@ def multi_thread(page_items):
         file.write(frontmatter)
         file.write(content)
 
-# Directory validation
+# Validates if a provided directory exists
 def valid_dir(target):
     if os.path.exists(target):
         return target
     raise argparse.ArgumentTypeError(f"The directory '{target}' does not exist")
 
-# Main script execution
+# Main script execution: Parse arguments and execute the workflow
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fetch Notion pages and convert them to Markdown")
     parser.add_argument("--static", type=valid_dir, help="Static path folder", required=True)
@@ -136,7 +164,6 @@ if __name__ == "__main__":
     parser.add_argument("--db", type=str, help="Database ID", required=True)
     parser.add_argument("--key", type=str, help="Notion API key", required=True)
     parser.add_argument("--hugo", action=argparse.BooleanOptionalAction, help="Add page frontmatter for Hugo")
-
     args = parser.parse_args()
 
     headers = {
@@ -148,6 +175,5 @@ if __name__ == "__main__":
 
     pages = query_db(args.db)
     thread_count = min(os.cpu_count(), 3)
-
     with Pool(thread_count) as p:
         p.map(multi_thread, pages.items())
