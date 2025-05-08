@@ -7,8 +7,17 @@ from multiprocessing import Pool
 
 # Function to safely extract image URLs
 def get_image(block):
-    content = block.get("content", {})
-    return content.get("file", {}).get("url", "") or content.get("external", {}).get("url", "")
+    url = block.get("content", {}).get("file", {}).get("url", "")
+    if not url:
+        return ""
+    
+    filename = f"{block['id']}.{url.split('/')[-1].split('?')[0].split('.')[-1]}"
+    image_data = requests.get(url).content
+    with open(f"{args.static}/{filename}", "wb") as file:
+        file.write(image_data)
+
+    image_path = os.path.join(args.url, filename)
+    return f"![]({image_path}#center)"
 
 # Function to handle rich text annotations in Notion
 def parse_annotations(annotations, text):
@@ -32,7 +41,7 @@ def parse_block_type(block, numbered_list_index, depth):
     
     rich_text = block.get("content", {}).get("rich_text", [])
     for text_data in rich_text:
-        text = parse_annotations(text_data["annotations"], text_data["plain_text"])
+        text = parse_annotations(text_data.get("annotations", {}), text_data.get("plain_text", ""))
         if text_data.get("href"):
             text = f"[{text}]({text_data['href']})"
         result += text
@@ -78,17 +87,18 @@ def query_blocks(page_id, start_cursor=None, blocks=None):
     
     return query_blocks(page_id, response.get("next_cursor"), result) if response.get("has_more") else result
 
-# Parses frontmatter data safely
+# Parses frontmatter data safely for your Notion database structure
 def parse_frontmatter(properties):
     return json.dumps({
-        "categories": [item["name"] for item in properties.get("Categories", {}).get("multi_select", [])],
+        "title": properties.get("Title", {}).get("title", [{}])[0].get("plain_text", "Untitled"),
         "date": properties.get("Date", {}).get("date", {}).get("start", ""),
         "tags": [item["name"] for item in properties.get("Tags", {}).get("multi_select", [])],
-        "title": properties.get("Title", {}).get("title", [{}])[0].get("plain_text", "Untitled"),
+        "categories": [item["name"] for item in properties.get("Categories", {}).get("multi_select", [])],
         "url": properties.get("URL", {}).get("url", ""),
+        "published": properties.get("Published", {}).get("checkbox", False)  # Ensuring it defaults to False if missing
     })
 
-# Fetches pages from the Notion database
+# Fetches pages from your Notion database
 def query_db(db_id):
     result = {}
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
